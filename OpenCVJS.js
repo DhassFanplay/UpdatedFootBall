@@ -104,7 +104,8 @@ async function loadDetector() {
         await tf.ready();
 
         detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-            modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER,
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+            enableSmoothing: true,
         });
 
         console.log("MoveNet detector loaded");
@@ -158,11 +159,12 @@ function startPoseDetectionLoop() {
                 const leftAnkle = keypoints[15];
                 const rightAnkle = keypoints[16];
 
+                const foot = (leftAnkle?.score ?? 0) > (rightAnkle?.score ?? 0) ? leftAnkle : rightAnkle;
 
-                if (rightAnkle && rightAnkle.score > 0.15) {
+                if (foot && foot.score > 0.2) {
                     const normalized = {
-                        x: rightAnkle.x / canvas.width,
-                        y: rightAnkle.y / canvas.height
+                        x: foot.x / canvas.width,
+                        y: foot.y / canvas.height
                     };
                     if (unityInstance) {
                         unityInstance.SendMessage("FootCube", "OnReceiveFootPosition", JSON.stringify(normalized));
