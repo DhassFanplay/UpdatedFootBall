@@ -1,2 +1,0 @@
-"# WristDetection" 
-"# FootBallProperCamera" 
