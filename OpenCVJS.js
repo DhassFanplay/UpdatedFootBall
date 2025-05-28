@@ -161,7 +161,7 @@ function startPoseDetectionLoop() {
 
                 const foot = (leftAnkle?.score ?? 0) > (rightAnkle?.score ?? 0) ? leftAnkle : rightAnkle;
 
-                if (foot && foot.score > 0.2) {
+                if (foot && foot.score > 0.01) {
                     const normalized = {
                         x: foot.x / canvas.width,
                         y: foot.y / canvas.height
