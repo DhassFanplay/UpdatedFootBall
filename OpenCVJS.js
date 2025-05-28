@@ -9,6 +9,10 @@ let firstFrameSent = false;
 let frameLoopId = null;
 let poseLoopId = null;
 
+const MIN_SCORE = 0.2;
+const SMOOTHING_ALPHA = 0.6;
+let lastFoot = null;
+
 // Step 1: Send available cameras to Unity
 async function listCameras() {
     if (!navigator.mediaDevices?.enumerateDevices) {
@@ -53,10 +57,9 @@ async function StartPoseTracking(deviceId) {
     startPoseDetectionLoop();
 }
 
-// Step 3: Setup camera and video
+// Step 3: Setup camera and canvas
 async function setupCamera(deviceId) {
     try {
-        // Stop previous tracks
         if (video?.srcObject) {
             video.srcObject.getTracks().forEach(track => track.stop());
             video.srcObject = null;
@@ -104,8 +107,7 @@ async function loadDetector() {
         await tf.ready();
 
         detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-            enableSmoothing: true,
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
         });
 
         console.log("MoveNet detector loaded");
@@ -114,7 +116,7 @@ async function loadDetector() {
     }
 }
 
-// Step 5a: Start frame sending loop
+// Step 5a: Send video frame to Unity
 function startFrameLoop() {
     function sendFrame() {
         if (!video || video.readyState < 2) {
@@ -142,16 +144,22 @@ function startFrameLoop() {
     sendFrame();
 }
 
-// Step 5b: Start pose detection loop
+// Step 5b: Estimate poses and send foot position to Unity
 function startPoseDetectionLoop() {
     async function detect() {
         if (!detector || !video || video.readyState < 2) {
             poseLoopId = requestAnimationFrame(detect);
             return;
         }
+
         if (unityInstance) {
             unityInstance.SendMessage("CameraManager", "AILoaded");
         }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
         try {
             const poses = await detector.estimatePoses(canvas);
             if (poses.length > 0) {
@@ -161,11 +169,21 @@ function startPoseDetectionLoop() {
 
                 const foot = (leftAnkle?.score ?? 0) > (rightAnkle?.score ?? 0) ? leftAnkle : rightAnkle;
 
-                if (foot && foot.score > 0.05) {
+                if (foot && foot.score > MIN_SCORE) {
+                    const smoothed = lastFoot
+                        ? {
+                            x: SMOOTHING_ALPHA * lastFoot.x + (1 - SMOOTHING_ALPHA) * foot.x,
+                            y: SMOOTHING_ALPHA * lastFoot.y + (1 - SMOOTHING_ALPHA) * foot.y
+                        }
+                        : { x: foot.x, y: foot.y };
+
+                    lastFoot = smoothed;
+
                     const normalized = {
-                        x: foot.x / canvas.width,
-                        y: foot.y / canvas.height
+                        x: smoothed.x / canvas.width,
+                        y: smoothed.y / canvas.height
                     };
+
                     if (unityInstance) {
                         unityInstance.SendMessage("FootCube", "OnReceiveFootPosition", JSON.stringify(normalized));
                     }
@@ -175,13 +193,17 @@ function startPoseDetectionLoop() {
             console.error("Pose detection error:", err);
         }
 
-        poseLoopId = requestAnimationFrame(detect);
+        if ('requestVideoFrameCallback' in video) {
+            video.requestVideoFrameCallback(() => detect());
+        } else {
+            poseLoopId = requestAnimationFrame(detect);
+        }
     }
 
     detect();
 }
 
-// Cancel any running frame or pose loop
+// Cancel any active loops
 function cancelLoops() {
     if (frameLoopId) cancelAnimationFrame(frameLoopId);
     if (poseLoopId) cancelAnimationFrame(poseLoopId);
